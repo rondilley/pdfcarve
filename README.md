@@ -1,2 +1,0 @@
-# pdfcarve
-PDF Carver

@@ -7,7 +7,13 @@ http://www.uberadmin.com/Projects/pdfcarve/
 
 == What is pdfcarve?
 
+PDF Carver is a simple command line tool for viewing and extracting
+interesting data from PDF files.
+
 == Why use it?
+
+If you have a PDF that you suspect contains something malicious,
+this tool may help you better understand the files nature.
 
 == Implimentation
 
