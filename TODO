@@ -1,0 +1,14 @@
+PDF Carver (pdfcarve) TODO list
+==============
+
+Short-term:
+-----------
+* syntax error detection
+* object dereferencing
+* parse xref tables
+
+Long-term:
+----------
+* track changes reporting
+* sanity checking and reporting on all indexes and pointers
+

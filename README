@@ -1,0 +1,34 @@
+=== PDF Carver (pdfcarve)
+
+by Ron Dilley <ron.dilley@uberadmin.com>
+
+For the latest information on logstore, please see:
+http://www.uberadmin.com/Projects/pdfcarve/
+
+== What is pdfcarve?
+
+== Why use it?
+
+== Implimentation
+
+== Security Implications
+
+Assume that there are errors in the pdfcarve source that
+would allow a specially crafted file to allow an attacker
+to exploit pdfcarve to gain access to the computer that it is
+running on!!! Don't trust this software and install and use
+is at your own risk.
+
+== Bugs
+
+I am not a programmer by any strech of the imagination.  I
+have attempted to remove the obvious bugs and other
+programmer related errors but please keep in mind the first
+sentence.  If you find an issue with code, please send me
+an e-mail with details and I will be happy to look into
+it.
+
+Ron Dilley
+ron.dilley@uberadmin.com
+
+

@@ -1,0 +1,8 @@
+Version 0.4 (September 04, 2008):
+
+* First public release.
+
+Version 0.7 (March 14, 2016):
+
+* Minor bug fixes
+* Extracts data after PDF EOF

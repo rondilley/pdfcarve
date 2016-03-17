@@ -1,0 +1,75 @@
+.TH PDFCARVE 1  "14 March 2016" "pdfcarve @VERSION@" "pdfcarve @VERSION@"
+.SH NAME
+pdfcarve \- PDF file checker.
+.SH SYNOPSIS
+.na
+.B pdfcarve
+[
+.B \-hv
+] [
+.B \-d
+.I log\-level
+] [
+.B \-w
+]
+.SH DESCRIPTION
+.LP
+\flpdfcarve\fP is a simple PDF file parser that can be used to enumerate PDF file.
+
+% pdfcarve [options] infile.pdf 
+
+.SH OPTIONS
+.TP
+.B \-d
+Enable debug mode, the higher the \fllog\-level\fP, the more verbose the logging.
+.TP
+.B \-h
+Display help details.
+.TP
+.B \-v
+Show version information.
+.TP
+.B \-w
+write streams to disk.
+
+.SH DIAGNOSTICS
+\flpdfcarve\fP returns 0 on normal program termination and 1 on error.  Additional diagnostic information is available through the \-d command line switch.
+
+.SH SIGNALS
+.TP
+.B \flSIGHUP\fP will cause \flpdfcarve\fP to quit gracefully.
+.TP
+.B \flSIGTERM\fP will cause \flpdfcarve\fP to shutdown.
+
+.SH FILES
+
+.SH SEE ALSO
+
+.SH COPYRIGHT
+quickparser is Copyright (c) 2003-2016 Ron Dilley.
+
+This program is free software; you can redistribute it and/or modify 
+it under the terms of the GNU General Public License as published 
+by the Free Software Foundation; either version 2 of the License, 
+or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, 
+but WITHOUT ANY WARRANTY; without even the implied warranty of 
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the 
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License 
+along with this program; if not, write to the Free Software 
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, 
+MA 02111-1307 USA.
+
+.SH BUGS
+Please send problems, bugs, questions, desirable enhancements, etc. to:
+pdfcarve-workers@uberadmin.com
+
+Please send source code contributions, etc. to:
+pdfcarve-patches@uberadmin.com
+
+There are no documented bugs at this time.
+.SH AUTHORS
+Ron Dilley e-mail: ron.dilley@uberadmin.com

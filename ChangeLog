@@ -1,0 +1,12 @@
+2008-09-04  Ron Dilley <ron.dilley@uberadmin.com>
+
+        * Initial public release.
+
+2008-09-06  Ron Dilley <ron.dilley@uberadmin.com>
+
+	* Added decoders for HEX, UTF-8 and OCTEL strings
+
+2016-03-14  Ron Dilley <ron.dilley@uberadmin.com>
+
+	* Addressed several parsing logic bugs
+	* Added ability to view and save data after the PDF EOF
