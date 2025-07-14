@@ -2,7 +2,7 @@
  *
  * Description: PDF parser headers
  * 
- * Copyright (c) 2008-2016, Ron Dilley
+ * Copyright (c) 2008-2025, Ron Dilley
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -102,11 +102,12 @@ struct pdfFile {
  ****/
 struct pdfFile *loadFile( char *fname );
 int parseFile( struct pdfFile *ptrPdf );
-size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, struct pdfObject *curObjPtr );
+size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, struct pdfObject *curObjPtr, int depth );
 struct pdfObject *parseObject( int inFile, off_t offset );
 char *safePrint( char *outBuf, int outBufSize, char *inBuf );
 void hexDump( size_t bPos, uint8_t buf[], size_t len );
 size_t writeStream( size_t curPos, uint8_t *buf, size_t len );
+void cleanupPdfObjectTree( struct pdfObject *root );
 unsigned int xtoi( const char* xs, int maxSize );
 
 #endif /* end of PARSER_DOT_H */

@@ -1,8 +1,17 @@
 #!/bin/sh
+#
+# desc: simple script to run all auto commands
+#
+####
 
-echo "pdfcarve - bootstrap"
-aclocal
-automake --gnu --add-missing
-autoheader
-autoconf
+# defines needed for OpenBSD
+AUTOMAKE_VERSION=1.15;export AUTOMAKE_VERSION
+AUTOCONF_VERSION=2.69;export AUTOCONF_VERSION
+
+if [ ! -d config ]; then
+ mkdir config
+fi
+
+autoreconf -ifv
+
 

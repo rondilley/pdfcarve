@@ -2,7 +2,7 @@
  *
  * Description: Utility Function Headers
  * 
- * Copyright (c) 2009-2015, Ron Dilley
+ * Copyright (c) 2009-2025, Ron Dilley
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -66,7 +66,7 @@
  *
  ****/
 
-int display( int level, char *format, ... );
+int display( int level, const char *format, ... );
 int open_devnull( int fd );
 int is_dir_safe( const char *dir );
 int create_pid_file( const char *filename );

@@ -6,3 +6,8 @@ Version 0.7 (March 14, 2016):
 
 * Minor bug fixes
 * Extracts data after PDF EOF
+
+Version 0.8 (July 14, 2025)
+
+* Minor security enhancements
+* Added --enable-hardening

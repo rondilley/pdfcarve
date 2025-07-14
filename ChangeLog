@@ -10,3 +10,9 @@
 
 	* Addressed several parsing logic bugs
 	* Added ability to view and save data after the PDF EOF
+
+2025-07-14  Ron Dilley <ron.dilley@uberadmin.com>
+
+	* Minor security enhancements
+	* Added --enable-hardening switch
+	

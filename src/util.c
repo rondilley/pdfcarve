@@ -2,7 +2,7 @@
  *
  * Description: Utility Functions
  * 
- * Copyright (c) 2009-2015, Ron Dilley
+ * Copyright (c) 2009-2025, Ron Dilley
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -154,15 +154,23 @@ int is_dir_safe( const char *dir ) {
  *
  ****/
 
-int display( int level, char *format, ... ) {
+int display( int level, const char *format, ... ) {
   PRIVATE va_list args;
   PRIVATE char tmp_buf[SYSLOG_MAX];
   PRIVATE int i;
+  PRIVATE int ret;
+
+  if ( format == NULL ) {
+    return FAILED;
+  }
 
   va_start( args, format );
-  vsprintf( tmp_buf, format, args );
-  if ( tmp_buf[strlen(tmp_buf)-1] == '\n' ) {
+  ret = vsnprintf( tmp_buf, sizeof(tmp_buf), format, args );
+  if ( ret >= 0 && ret < sizeof(tmp_buf) && tmp_buf[strlen(tmp_buf)-1] == '\n' ) {
     tmp_buf[strlen(tmp_buf)-1] = 0;
+  } else if ( ret >= sizeof(tmp_buf) ) {
+    /* truncated, ensure null termination */
+    tmp_buf[sizeof(tmp_buf)-1] = 0;
   }
   va_end( args );
 

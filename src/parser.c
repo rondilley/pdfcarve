@@ -2,7 +2,7 @@
  *
  * Description: PDF Parser functions
  * 
- * Copyright (c) 2008-2016, Ron Dilley
+ * Copyright (c) 2008-2025, Ron Dilley
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -30,6 +30,11 @@
 #define PDF_FILTER_ZLIB 1
 
 #define MAX_OBJ_DEPTH 64
+#define MAX_PARSE_DEPTH 256
+#define MAX_FILE_SIZE (256 * 1024 * 1024)  /* 256MB max */
+#define MAX_STREAM_SIZE (64 * 1024 * 1024)   /* 64MB max */
+#define MAX_STRING_LEN 8192
+#define MAX_NAME_LEN 1024
 
 /****
  *
@@ -186,14 +191,29 @@ struct pdfFile *loadFile( char *fname ) {
     return NULL;
   }
 
-  /* read the file into ram */
+  /* read the file into ram with size limits */
   while( ( rCount = fread( inBuf, 1, sizeof( inBuf ), inFile ) ) > 0 ) {
-    if ( ( ptrPdf->fileBuf = XREALLOC( ptrPdf->fileBuf, ptrPdf->fileSize + rCount ) ) EQ NULL ) {
-      display( LOG_DEBUG, "Unable to grow file buffer" );
+    /* Check for integer overflow and size limits */
+    if ( ptrPdf->fileSize > MAX_FILE_SIZE - rCount ) {
+      display( LOG_ERR, "File size exceeds maximum allowed size (%d bytes)", MAX_FILE_SIZE );
+      fclose( inFile );
+      return NULL;
+    }
+    
+    size_t new_size = ptrPdf->fileSize + rCount;
+    if ( new_size < ptrPdf->fileSize ) { /* overflow check */
+      display( LOG_ERR, "Integer overflow detected in file size calculation" );
+      fclose( inFile );
+      return NULL;
+    }
+    
+    if ( ( ptrPdf->fileBuf = XREALLOC( ptrPdf->fileBuf, new_size ) ) EQ NULL ) {
+      display( LOG_ERR, "Unable to grow file buffer" );
+      fclose( inFile );
       return  NULL;
     }
     XMEMCPY( ptrPdf->fileBuf + ptrPdf->fileSize, inBuf, rCount );
-    ptrPdf->fileSize += rCount;
+    ptrPdf->fileSize = new_size;
   }
 
   /* close file */
@@ -227,39 +247,13 @@ int parseFile( struct pdfFile *ptrPdf ) {
 
   XSTRNCPY( outFileName, ptrPdf->fname, MAXNAMELEN );
 
-  parsePdfObj( 0, ptrPdf->fileBuf, ptrPdf->fileSize, PDF_TYPE_NONE, ptrPdf->head );
+  parsePdfObj( 0, ptrPdf->fileBuf, ptrPdf->fileSize, PDF_TYPE_NONE, ptrPdf->head, 0 );
 
   showPdfObjects( ptrPdf->head );
 
-  /* cleanup object tree */
-  while ( ptrPdf->head != NULL ) {
-    if ( ptrPdf->head->child != NULL ) {
-      /* descend */
-      ptrPdf->head = ptrPdf->head->child;
-    } else if ( ptrPdf->head->next != NULL ) {
-      /* empty this level */
-      tmpPtr = ptrPdf->head;
-#ifdef DEBUG
-      if ( config->debug >= 3 )
-	display( LOG_DEBUG, "Removing pdf object from memory chain [%s]", typeStrings[tmpPtr->type] );
-#endif
-      ptrPdf->head = ptrPdf->head->next;
-      XFREE( tmpPtr );
-    } else if ( ptrPdf->head->parent != NULL ) {
-      /* ascend, removing the child */
-      tmpPtr = ptrPdf->head;
-#ifdef DEBUG
-      if ( config->debug >= 3 )
-	display( LOG_DEBUG, "Removing child pdf object from memory chain [%s]", typeStrings[tmpPtr->type] );
-#endif
-      ptrPdf->head->parent->child = NULL;
-      ptrPdf->head = ptrPdf->head->parent;
-      XFREE( tmpPtr );
-    } else {
-      /* at the root, time to stop */
-      ptrPdf->head = NULL;
-    }
-  }
+  /* cleanup object tree with improved memory management */
+  cleanupPdfObjectTree( ptrPdf->head );
+  ptrPdf->head = NULL;
 }
 
 /****
@@ -267,6 +261,34 @@ int parseFile( struct pdfFile *ptrPdf ) {
  * insert pdf object into memory chain
  *
  ****/
+
+void cleanupPdfObjectTree( struct pdfObject *root ) {
+  if ( !root ) return;
+  
+  /* Post-order traversal to safely delete all nodes */
+  if ( root->child ) {
+    cleanupPdfObjectTree( root->child );
+    root->child = NULL;
+  }
+  
+  if ( root->next ) {
+    cleanupPdfObjectTree( root->next );
+    root->next = NULL;
+  }
+  
+  /* Clean up any allocated buffer in the object */
+  if ( root->buf ) {
+    XFREE( root->buf );
+    root->buf = NULL;
+  }
+  
+#ifdef DEBUG
+  if ( config->debug >= 3 && root->type >= 0 && root->type < sizeof(typeStrings)/sizeof(typeStrings[0]) )
+    display( LOG_DEBUG, "Freeing pdf object [%s]", typeStrings[root->type] );
+#endif
+  
+  XFREE( root );
+}
 
 struct pdfObject *insertPdfObject( struct  pdfObject *curObjPtr ) {
   struct pdfObject *tmpObjPtr, *newObjPtr;
@@ -310,13 +332,25 @@ struct pdfObject *insertPdfObject( struct  pdfObject *curObjPtr ) {
  *
  ****/
 
-size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, struct pdfObject *curObjPtr ) {
+size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, struct pdfObject *curObjPtr, int depth ) {
   size_t curPos = startPos, bufOffset = 0, sPos;
   uint8_t tmpByte = 0, status = 0, *destBuf;
   int offset = 0, objNum = 0, objRev = 0, count = 0, getNum = 0, i;
-  char tmpStr[1024];
-  char tmpBuf[4096];
+  char tmpStr[MAX_STRING_LEN];
+  char tmpBuf[MAX_STRING_LEN];
   struct pdfObject *tmpObjPtr;
+
+  /* Check recursion depth */
+  if (depth > MAX_PARSE_DEPTH) {
+    display(LOG_ERR, "Maximum parsing depth exceeded");
+    return endPos;
+  }
+
+  /* Validate input parameters */
+  if (!buf || !curObjPtr || startPos >= endPos || endPos == 0) {
+    display(LOG_ERR, "Invalid parameters to parsePdfObj");
+    return endPos;
+  }
 
   /*
    * parse this object
@@ -345,14 +379,14 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
 	    return FAILED;
 	  }
 	  curObjPtr->type = PDF_TYPE_DICTIONARY;
-	  curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_DICTIONARY, curObjPtr );
+	  curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_DICTIONARY, curObjPtr, depth + 1 );
 	} else { /* hex string */
 	  curPos++;
 	  if ( ( curObjPtr = insertPdfObject( curObjPtr ) ) EQ NULL ) {
 	    return FAILED;
 	  }
 	  curObjPtr->type = PDF_TYPE_HEXSTRING; 
-	  curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_HEXSTRING, curObjPtr );
+	  curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_HEXSTRING, curObjPtr, depth + 1 );
 	}
       } else if ( buf[curPos] EQ '(' ) { /* string */
 	curPos++;
@@ -360,14 +394,14 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
 	  return FAILED;
 	}
 	curObjPtr->type = PDF_TYPE_STRING; 
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_STRING, curObjPtr );
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_STRING, curObjPtr, depth + 1 );
       } else if ( buf[curPos] EQ '/' ) { /* label */
 	curPos++;
 	if ( ( curObjPtr = insertPdfObject( curObjPtr ) ) EQ NULL ) {
 	  return FAILED;
 	}
 	curObjPtr->type = PDF_TYPE_NAME; 
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_NAME, curObjPtr );
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_NAME, curObjPtr, depth + 1 );
       } else if ( buf[curPos] EQ '[' ) {
 	/* array */
 	curPos++;
@@ -375,8 +409,8 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
 	  return FAILED;
 	}
 	curObjPtr->type = PDF_TYPE_ARRAY; 
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_ARRAY, curObjPtr );
-      } else if ( sscanf( buf+curPos, "%d %d %n%s", &objNum, &objRev, &offset, tmpStr ) EQ 3 ) { /* named object */
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_ARRAY, curObjPtr, depth + 1 );
+      } else if ( curPos + 32 < endPos && sscanf( (char *)(buf+curPos), "%d %d %n%31s", &objNum, &objRev, &offset, tmpStr ) EQ 3 ) { /* named object */
 	if ( strncmp( tmpStr, "obj", 3 ) EQ 0 ) {
 	  printf( "Object: %d %d\n", objNum, objRev );
 	  curPos += ( offset + 3 );
@@ -386,7 +420,7 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
 	  curObjPtr->type = PDF_TYPE_OBJECT;
 	  curObjPtr->num = objNum;
 	  curObjPtr->gen = objRev;
-	  curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_OBJECT, curObjPtr );
+	  curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_OBJECT, curObjPtr, depth + 1 );
 	} else if ( tmpStr[0] EQ 'R' ) {
 	  printf( "ObjRef: %d %d\n", objNum, objRev );
 	  curPos += ( offset + 1 );
@@ -403,20 +437,20 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
 	    return FAILED;
 	  }
 	  curObjPtr->type = PDF_TYPE_INTNUM;
-	  curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_INTNUM, curObjPtr );
+	  curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_INTNUM, curObjPtr, depth + 1 );
 	}
       } else if ( isdigit( buf[curPos] ) || ( buf[curPos] EQ '-' ) || ( buf[curPos] EQ '+' ) ) { /* number */
 	if ( ( curObjPtr = insertPdfObject( curObjPtr ) ) EQ NULL ) {
 	  return FAILED;
 	}
 	curObjPtr->type = PDF_TYPE_INTNUM;
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_INTNUM, curObjPtr );
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_INTNUM, curObjPtr, depth + 1 );
       } else if ( ( buf[curPos] EQ 't' ) || ( buf[curPos] EQ 'f' ) ) { /* boolean number */
 	if ( ( curObjPtr = insertPdfObject( curObjPtr ) ) EQ NULL ) {
 	  return FAILED;
 	}
 	curObjPtr->type = PDF_TYPE_BOOL;
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_BOOL, curObjPtr );
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_BOOL, curObjPtr, depth + 1 );
       } else if ( buf[curPos] EQ '%' ) { /* comment */
 	curPos++;
         /* check if this is EOF */
@@ -424,14 +458,14 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
             curPos += 5;
             printf( "EOF\n" );
             curObjPtr->type = PDF_TYPE_EOF;
-            curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_EOF, curObjPtr );
+            curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_EOF, curObjPtr, depth + 1 );
 
         } else {
             if ( ( curObjPtr = insertPdfObject( curObjPtr ) ) EQ NULL ) {
                 return FAILED;
             }
             curObjPtr->type = PDF_TYPE_COMMENT;
-            curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_COMMENT, curObjPtr );
+            curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_COMMENT, curObjPtr, depth + 1 );
         }
       } else if ( strncmp( buf+curPos, "stream", 6 ) EQ 0 ) { /* stream */
 	curPos += 6;
@@ -443,7 +477,7 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
 	  return FAILED;
 	}
 	curObjPtr->type = PDF_TYPE_STREAM;
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_STREAM, curObjPtr );
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_STREAM, curObjPtr, depth + 1 );
       } else if ( strncmp( buf+curPos, "obj", 3 ) EQ 0 ) {
 	/* object */
 	curPos += 3;
@@ -451,7 +485,7 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
 	  return FAILED;
 	}
 	curObjPtr->type = PDF_TYPE_OBJECT;
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_OBJECT, curObjPtr );
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_OBJECT, curObjPtr, depth + 1 );
       } else if ( strncmp( buf+curPos, "xref", 4 ) EQ 0 ) {
           
 	/* start of footer */
@@ -460,11 +494,11 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
 	  return FAILED;
 	}
 	curObjPtr->type = PDF_TYPE_FOOTER;
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_FOOTER, curObjPtr );
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_FOOTER, curObjPtr, depth + 1 );
         
       } else if ( strncmp( buf+curPos, "startxref", 9 ) EQ 0 ) {
         curPos += 9;  
-        curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_NONE, curObjPtr );
+        curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_NONE, curObjPtr, depth + 1 );
       } else if ( strncmp( buf+curPos, "endobj", 6 ) EQ 0 ) {
 	return( curPos );
 
@@ -518,7 +552,7 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
       while( ( isdigit( buf[curPos] ) ) || ( buf[curPos] EQ '.' ) ) {
 	if ( buf[curPos] EQ '.' ) {
 	  curObjPtr->type = PDF_TYPE_REALNUM;
-	  return parsePdfObj( sPos, buf, endPos, PDF_TYPE_REALNUM, curObjPtr );
+	  return parsePdfObj( sPos, buf, endPos, PDF_TYPE_REALNUM, curObjPtr, depth );
 	}
 	curPos++;
       }
@@ -599,10 +633,10 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
       sPos = curPos;
       if ( strncmp( buf+curPos, "254 255", 7 ) EQ 0 ) {
 	curObjPtr->type = PDF_TYPE_UTFSTRING;
-	return parsePdfObj( curPos, buf, endPos, PDF_TYPE_UTFSTRING, curObjPtr );
+	return parsePdfObj( curPos, buf, endPos, PDF_TYPE_UTFSTRING, curObjPtr, depth );
       } else if ( ( buf[curPos] EQ 'D' ) && ( buf[curPos+1] EQ ':' ) ) {
 	curObjPtr->type = PDF_TYPE_DATESTRING;
-	return parsePdfObj( curPos, buf, endPos, PDF_TYPE_DATESTRING, curObjPtr );
+	return parsePdfObj( curPos, buf, endPos, PDF_TYPE_DATESTRING, curObjPtr, depth );
       }
 
       while( buf[curPos] != ')' ) {
@@ -617,7 +651,7 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
 
     } else if ( dataType EQ PDF_TYPE_UTFSTRING ) {
       /* ( 254 255 ... ) = utf encoded literal string */
-      while( sscanf( buf+curPos, "%u%n", (unsigned int *)&tmpByte, &offset ) EQ 1 ) {
+      while( curPos + 8 < endPos && sscanf( (char *)(buf+curPos), "%u%n", (unsigned int *)&tmpByte, &offset ) EQ 1 ) {
 	curPos += offset;
 	if ( buf[curPos] EQ ' ' ) {
 	  curPos++;
@@ -678,7 +712,7 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
     } else if ( dataType EQ PDF_TYPE_ARRAY ) {
       /* [ ... ] = array NOTE can be an array of any n objects */
       while( buf[curPos] != ']' ) {
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_NONE, curObjPtr );
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_NONE, curObjPtr, depth + 1 );
       }
       curPos++;
       if ( config->verbose )
@@ -692,7 +726,7 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
       /* << name ... >> = dictionary where key is a name and value can be any object */
       /* XXX organize into name, value pairs */
       while( strncmp( buf+curPos, ">>", 2 ) != 0 ) {
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_NONE, curObjPtr );
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_NONE, curObjPtr, depth + 1 );
       }
       curPos += 2;
       if ( config->verbose )
@@ -703,7 +737,7 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
       /* 3 0 obj ... endobj = turns any object into an indirect (referencable) object */
       /*                      3 = objNum, 0 = objRev */
       while ( strncmp( buf+curPos, "endobj", 6 ) != 0 ) {
-	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_NONE, curObjPtr );
+	curPos = parsePdfObj( curPos, buf, endPos, PDF_TYPE_NONE, curObjPtr, depth + 1 );
       }
       curPos += 6;
       if ( config->verbose )
@@ -721,12 +755,25 @@ size_t parsePdfObj( size_t startPos, uint8_t *buf, size_t endPos, int dataType, 
 
       printf( "Stream: %lu bytes\n", curPos - sPos );
 
-      /* allocate buffer for decompressed stream */
-      if ( ( destBuf = XMALLOC( ( curPos - sPos ) * 4 ) ) EQ NULL ) {
-	fprintf( stderr, "ERR - Unable to allocate memory for stream\n" );
-	exit( 1 );
+      /* allocate buffer for decompressed stream with overflow protection */
+      size_t stream_len = curPos - sPos;
+      if ( stream_len > MAX_STREAM_SIZE ) {
+        display( LOG_ERR, "Stream size exceeds maximum allowed (%d bytes)", MAX_STREAM_SIZE );
+        return curPos;
       }
-      XMEMSET( destBuf, 0, ( curPos-sPos ) * 4 );
+      
+      /* Check for multiplication overflow */
+      if ( stream_len > SIZE_MAX / 4 ) {
+        display( LOG_ERR, "Stream decompression buffer size would overflow" );
+        return curPos;
+      }
+      
+      size_t dest_buf_size = stream_len * 4;
+      if ( ( destBuf = XMALLOC( dest_buf_size ) ) EQ NULL ) {
+	display( LOG_ERR, "Unable to allocate memory for stream" );
+	return curPos;
+      }
+      XMEMSET( destBuf, 0, dest_buf_size );
 
       /* decompress the stream */
       z_stream zstrm;
@@ -804,7 +851,19 @@ size_t writeStream( size_t curPos, uint8_t *buf, size_t len ) {
   char tmpFileName[MAXNAMELEN];
   size_t wCount;
 
-  sprintf( tmpFileName, "%s.pdfcarve.%lu", outFileName, curPos );
+  /* Sanitize filename to prevent path traversal */
+  char *base_name = strrchr(outFileName, '/');
+  if (base_name) {
+    base_name++; /* skip the '/' */
+  } else {
+    base_name = outFileName;
+  }
+  
+  /* Ensure we don't exceed buffer bounds */
+  if (snprintf( tmpFileName, sizeof(tmpFileName), "%s.pdfcarve.%lu", base_name, curPos ) >= sizeof(tmpFileName)) {
+    display( LOG_ERR, "Filename too long for output" );
+    return 0;
+  }
   fprintf( stderr, "Saving object to [%s]\n", tmpFileName );
   
   if ( ( outFile = fopen( tmpFileName, "w" ) ) EQ NULL ) {
@@ -882,14 +941,19 @@ unsigned int xtoi( const char* xs, int maxSize ) {
 char *safePrint( char *outBuf, int outBufSize, char *inBuf ) {
     int i;
     
+    if ( !outBuf || !inBuf || outBufSize <= 0 ) {
+        return NULL;
+    }
+    
     XMEMSET( outBuf, 0, outBufSize );
     
-    for( i = 0; ( inBuf[i] != 0 ) && ( i < outBufSize ); i++ ) {
+    for( i = 0; ( inBuf[i] != 0 ) && ( i < outBufSize - 1 ); i++ ) {
         if ( isprint( inBuf[i] ) )
             outBuf[i] = inBuf[i];
         else
             outBuf[i] = '.';
     }
+    outBuf[outBufSize - 1] = '\0'; /* ensure null termination */
     
     return outBuf;
 }

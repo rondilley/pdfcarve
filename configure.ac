@@ -12,8 +12,16 @@ AC_PROG_CC
 dnl make /usr/local as the default install dir
 AC_PREFIX_DEFAULT(/usr/local)
 
-CFLAGS="${CFLAGS} -I. -I.. -I../include `getconf LFS64_CFLAGS`"
-LDFLAGS="${LDFLAGS} `getconf LFS64_LDFLAGS` `getconf LFS64_LIBS`"
+dnl Security hardening flags
+if test "$GCC" = yes; then
+    SECURITY_CFLAGS="-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -Wformat -Wformat-security -Werror=format-security"
+    SECURITY_LDFLAGS="-Wl,-z,relro -Wl,-z,now -pie"
+    CFLAGS="${CFLAGS} ${SECURITY_CFLAGS} -I. -I.. -I../include `getconf LFS64_CFLAGS`"
+    LDFLAGS="${LDFLAGS} ${SECURITY_LDFLAGS} `getconf LFS64_LDFLAGS` `getconf LFS64_LIBS`"
+else
+    CFLAGS="${CFLAGS} -I. -I.. -I../include `getconf LFS64_CFLAGS`"
+    LDFLAGS="${LDFLAGS} `getconf LFS64_LDFLAGS` `getconf LFS64_LIBS`"
+fi
 
 SPLINT="no"
 AC_ARG_ENABLE(splint,
@@ -27,12 +35,16 @@ AC_ARG_ENABLE(debug,
     [  --enable-debug          Enable debugging],
     [ if test "$GCC" = yes; then
           DEBUG="yes"
-          CFLAGS="${CFLAGS} -DDEBUG -ggdb"
+          CFLAGS="${CFLAGS} -DDEBUG -ggdb -O0"
       else
           DEBUG="yes"
           CFLAGS="${CFLAGS} -DDEBUG"
       fi
-    ],)
+    ],
+    [ if test "$GCC" = yes; then
+          CFLAGS="${CFLAGS} -O2"
+      fi
+    ])
 
 MEM_DEBUG="no"
 AC_ARG_ENABLE(memdebug,
@@ -58,6 +70,24 @@ AC_ARG_ENABLE(gprof,
       else
           GPROF="yes"
           CFLAGS="${CFLAGS} -DGPROF"
+      fi
+    ],)
+
+HARDENING="yes"
+AC_ARG_ENABLE(hardening,
+    [  --disable-hardening     Disable security hardening],
+    [ if test "$enableval" = "no"; then
+          HARDENING="no"
+          dnl Remove hardening flags if disabled
+          CFLAGS=`echo "$CFLAGS" | sed 's/-fstack-protector-strong//g'`
+          CFLAGS=`echo "$CFLAGS" | sed 's/-D_FORTIFY_SOURCE=2//g'`
+          CFLAGS=`echo "$CFLAGS" | sed 's/-fPIE//g'`
+          CFLAGS=`echo "$CFLAGS" | sed 's/-Wformat//g'`
+          CFLAGS=`echo "$CFLAGS" | sed 's/-Wformat-security//g'`
+          CFLAGS=`echo "$CFLAGS" | sed 's/-Werror=format-security//g'`
+          LDFLAGS=`echo "$LDFLAGS" | sed 's/-Wl,-z,relro//g'`
+          LDFLAGS=`echo "$LDFLAGS" | sed 's/-Wl,-z,now//g'`
+          LDFLAGS=`echo "$LDFLAGS" | sed 's/-pie//g'`
       fi
     ],)
 
@@ -234,5 +264,6 @@ echo ""
 echo "Enable debugging      : ${DEBUG}"
 echo "Enable mem debugging  : ${MEM_DEBUG}"
 echo "Show mem debugging    : ${SHOW_MEM_DEBUG}"
+echo "Security hardening    : ${HARDENING}"
 echo "-----------------------------------------------"
 echo ""
