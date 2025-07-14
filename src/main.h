@@ -41,14 +41,14 @@
 # include <config.h>
 #endif
 
-#include <sysdep.h>
+#include "../include/sysdep.h"
 
 #ifndef __SYSDEP_H__
 # error something is messed up
 #endif
 
 #include <zlib.h>
-#include <common.h>
+#include "../include/common.h"
 #include "util.h"
 #include "mem.h"
 #include "parser.h"
